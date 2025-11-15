@@ -5,24 +5,76 @@ format: typst
 
 ### Question 1
 
-Put your question here.
+How many districts are D vs R, D vs D, and R vs R?
 
 ### Answer 1
 
-Put your answer here.
+```{r}
+
+library(tidyverse)
+library(dplyr)
+g24_house <- read_csv("data/g24_house_clean.csv",
+show_col_types = FALSE)
+district_sums <- g24_house %>%
+  group_by(cddist) %>%
+  summarise(
+    dem_votes = sum(house_dem, na.rm = TRUE),
+    rep_votes = sum(house_rep, na.rm = TRUE)
+  ) %>%
+  mutate(
+    race_type = case_when(
+      dem_votes > 0 & rep_votes > 0 ~ "D vs R",
+      dem_votes > 0 & rep_votes == 0 ~ "D vs D",
+      dem_votes == 0 & rep_votes > 0 ~ "R vs R",
+      TRUE ~ "No major party votes"
+    )
+  )
+
+district_sums %>% count(race_type)
+```
+
+Most congressional districts were competitive (D vs R), but several had same-party matchups (D vs D or R vs R). D vs D = 4, D vs R = 48, R vs R = 1 
 
 ### Question 2
 
-Put your question here.
+Which districts were the closest races?
 
 ### Answer 2
 
-Put your answer here.
+```{r}
+library(tidyverse)
+library(dplyr)
+closest <- district_sums |>
+  mutate(
+    total = dem_votes + rep_votes,
+    dem_share = dem_votes / total,
+    margin = abs(dem_share - 0.5)
+  ) |>
+  filter(total > 0) |>  
+  arrange(margin)
+
+head(closest, 5)  
+```
+
+The closest district was district 45, the margin was 0.00110, dem_votes = 158216 while rep_votes = 15722. This showcases a close race
 
 ### Question 3
 
-Put your question here.
-
+What do precinct sizes look like?
 ### Answer 3
 
-Put your answer here.
+```{r}
+library(tidyverse)
+library(dplyr)
+summary(g24_house$totvote)
+
+ggplot(g24_house, aes(totvote)) +
+  geom_histogram(binwidth = 100, color = "black", fill = "lightblue") +
+  labs(
+    title = "Distribution of Precinct Total Votes",
+    x = "Total Votes",
+    y = "Number of Precincts"
+  )
+```
+
+Most precincts cast between 0 and 3793980 votes. The mean for each district was 2202 votes cast. 

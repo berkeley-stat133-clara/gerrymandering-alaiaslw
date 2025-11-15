@@ -1,5 +1,200 @@
 ---
-title: Dashboard
+title: "Dashboard"
 format: dashboard
 ---
 
+```{r}
+install.packages("ggplot2")
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(sf)
+
+
+
+g24_house <- read_csv("data/g24_house_clean.csv",
+show_col_types = FALSE)
+
+# District-level 2024 results (old map)
+
+district_24 <- g24_house |>
+group_by(cddist) |>
+summarise(
+dem_votes = sum(house_dem, na.rm = TRUE),
+rep_votes = sum(house_rep, na.rm = TRUE),
+.groups   = "drop"
+) |>
+mutate(
+total     = dem_votes + rep_votes,
+dem_share = dem_votes / total
+)
+
+
+district_25 <- read_csv("data/new_district_results.csv",
+show_col_types = FALSE) |>
+rename(cddist = new_cddist) |>
+mutate(
+total     = dem_votes + rep_votes,
+dem_share = dem_votes / total
+)
+
+
+contested_24 <- district_24 |>
+filter(dem_votes > 0, rep_votes > 0)
+
+contested_25 <- district_25 |>
+filter(dem_votes > 0, rep_votes > 0)
+
+
+efficiency_gap <- function(d_votes, r_votes) {
+total <- d_votes + r_votes
+threshold <- floor(total / 2) + 1
+
+dem_wasted <- ifelse(d_votes > r_votes,
+d_votes - threshold,
+d_votes)
+rep_wasted <- ifelse(r_votes > d_votes,
+r_votes - threshold,
+r_votes)
+
+sum(dem_wasted - rep_wasted) / sum(total)
+}
+```
+
+# MAPS #
+
+```{r}
+#Map 2024
+cd_2024 <- st_read("/Users/alaiawittfeld/gerrymandering-alaiaslw-1/data/tl_2024_06_cd119 2 copy/tl_2024_06_cd119.shp")
+cd_2024 <- cd_2024 |>
+  st_transform(3310)
+
+names(cd_2024)
+cd_2024 <- cd_2024 |>
+  mutate(cd_id = as.integer(CD119FP))
+
+district_24_map <- district_24 |>
+  mutate(cd_id = cddist)
+
+map_2024 <- cd_2024 |>
+  left_join(district_24_map, by = "cd_id")
+
+ggplot(map_2024) +
+  geom_sf(aes(fill = dem_share), color = NA) +
+  scale_fill_continuous(
+    name   = "Dem share",
+    labels = scales::percent,
+    limits = c(0, 1),
+    na.value = "grey80"
+  ) +
+  labs(
+    title    = "2024 Congressional Map (tl_2024_06_cd119)",
+    subtitle = "Democratic two-party vote share by district"
+  ) +
+  theme_minimal()
+
+```
+
+
+```{r}
+#Map 2025 
+ab604 <- st_read("data/new_data/AB604/AB604.shp")
+ab604 <- ab604 |>
+  st_transform(3310)
+
+names(ab604)   # inspect to see the DISTRICT column
+
+# Fix district ID type — make both sides CHARACTER
+ab604 <- ab604 |>
+  mutate(cd_id = DISTRICT |> as.character() |> str_trim())
+
+district_25_map <- district_25 |>
+  mutate(cd_id = as.character(cddist))
+
+map_ab604 <- ab604 |>
+  left_join(district_25_map, by = "cd_id")
+
+ggplot(map_ab604) +
+  geom_sf(aes(fill = dem_share), color = NA) +
+  scale_fill_continuous(
+    name = "Dem share",
+    labels = scales::percent,
+    limits = c(0, 1),
+    na.value = "grey80"
+  ) +
+  labs(
+    title    = "Proposed AB604 Congressional Map",
+    subtitle = "Democratic two-party vote share by district"
+  ) +
+  theme_minimal()
+
+```
+
+# SUMMARY #
+
+```{r}
+seats_24 <- contested_24 |>
+  summarise(
+    dem_seats = sum(dem_votes > rep_votes),
+    rep_seats = sum(rep_votes > dem_votes)
+  )
+
+seats_25 <- contested_25 |>
+  summarise(
+    dem_seats = sum(dem_votes > rep_votes),
+    rep_seats = sum(rep_votes > dem_votes)
+  )
+
+# Mean–median
+mm_24 <- mean(contested_24$dem_share) -
+         median(contested_24$dem_share)
+
+mm_25 <- mean(contested_25$dem_share) -
+         median(contested_25$dem_share)
+
+# Efficiency gap
+eg_24 <- efficiency_gap(contested_24$dem_votes,
+                        contested_24$rep_votes)
+
+eg_25 <- efficiency_gap(contested_25$dem_votes,
+                        contested_25$rep_votes)
+
+summary_tbl <- tibble(
+  metric    = c("Dem seats", "Rep seats",
+                "Mean–Median", "Efficiency Gap"),
+  map_2024  = c(seats_24$dem_seats,
+                seats_24$rep_seats,
+                mm_24,
+                eg_24),
+  map_2025  = c(seats_25$dem_seats,
+                seats_25$rep_seats,
+                mm_25,
+                eg_25)
+)
+
+summary_tbl
+
+```
+
+Democrats win 40 seats under the 2024 map and 46 under the AB604 map. The mean–median and efficiency gap become more favorable to Democrats under the new plan because of the redistricting allowing for more wasted votes under the efficency gap for Republicans when it comes to voting for their canidate. 
+
+## Methodology
+
+### Data sources
+
+Data came from California Secretary of State’s official 2024 General Election Statement of Vote. I used the precinct-level results for the U.S. House race that was cleaned earlier. The SR precinct shapefile and SR Statement of Vote file are from the Statewide Database. The “old” congressional districts are the 2024 California congressional districts from the Census shapefile `tl_2024_06_cd119`. The “new” districts are from the AB604 congressional district shapefile.
+
+### Data cleaning
+
+For both the SV and SR Statement of Vote files, I trimmed whitespace from character columns, converted registration and vote fields to integer counts and made non-numeric placeholders like `"***"`, `"."`, `"-"`, `"NA"`, and empty strings treated as missing and then set to 0. I then created Democratic and Republican House vote totals at the precinct or SR-precinct level and aggregated them to congressional districts.
+
+### Re-running the 2024 election under AB604
+
+To estimate how the 2024 election would have turned out under the AB604 map, I used an area-weighted approach. First, I joined the SR precinct vote data to the SR precinct shapefile. Then I intersected the SR precinct polygons with the AB604 district polygons using `st_intersection()`, which splits each precinct into pieces where it overlaps different districts. For each piece I computed the share of the precinct’s area inside that district and allocated the precinct’s Democratic and Republican votes in proportion to that area share. Finally, I summed these allocated vote pieces within each AB604 district to obtain hypothetical Democratic and Republican vote totals for the new map.
+
+### Gerrymandering statistics and caveats
+
+For both the 2024 map and the AB604 map, I focused on districts with two-party contests (both a Democrat and a Republican on the ballot). Computing number of seats won by each party, mean-median difference and efficency gap to calculate wasted votes across both parties.
+
+
+These statistics are helpful summaries of partisan bias, but they have limitations. They are based on a single election (2024), which may not reflect long-run partisan preferences. The area-weighted method assumes voters are uniformly distributed within each SR precinct, which may not be true in practice. In addition, California’s top-two primary and the presence of same-party general elections complicate “two-party” metrics because some districts lack one major party in November. For these reasons, the results should be interpreted as approximate indicators of partisan advantage rather than definitive proof of gerrymandering.

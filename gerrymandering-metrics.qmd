@@ -5,7 +5,105 @@ format: typst
 
 ### 2024 Election Results and the 2024 District Map
 
+```{r}
+library(tidyverse)
 
+g24_house <- read_csv("data/g24_house_clean.csv")
+
+district_24 <- g24_house |>
+  group_by(cddist) |>
+  summarise(
+    dem_votes = sum(house_dem, na.rm = TRUE),
+    rep_votes = sum(house_rep, na.rm = TRUE)
+  ) |>
+  mutate(
+    total = dem_votes + rep_votes,
+    dem_share = dem_votes / total
+  )
+
+#filter out the wasted votes districts
+contested_24 <- district_24 |>
+  filter(total > 0, dem_votes > 0, rep_votes > 0)
+
+#mean-median score
+mean_24 <- mean(contested_24$dem_share, na.rm = TRUE)
+median_24 <- median(contested_24$dem_share, na.rm = TRUE)
+
+mean_median_24 <- mean_24 - median_24
+mean_median_24
+
+```
+
+The mean–median difference for the 2024 congressional map is -0.01076338, indicating a slight bias toward Republicans meaning that the rep vote is "packed" which is good for democrats.
+
+```{r}
+efficiency_gap <- function(d_votes, r_votes) {
+  total <- d_votes + r_votes
+  threshold <- floor(total / 2) + 1
+  
+  dem_wasted <- ifelse(d_votes > r_votes,
+                       d_votes - threshold,
+                       d_votes)
+  
+  rep_wasted <- ifelse(r_votes > d_votes,
+                       r_votes - threshold,
+                       r_votes)
+  
+  sum(dem_wasted - rep_wasted) / sum(total)
+}
+eg_24 <- efficiency_gap(contested_24$dem_votes,
+                        contested_24$rep_votes)
+
+eg_24
+```
+
+The efficiency gap for the 2024 congressional map is -0.2638733, suggesting a bias toward Republicans since they have more wasted votes.
+
+```{r}
+list(
+  mean_share_24 = mean_24,
+  median_share_24 = median_24,
+  mean_median_24 = mean_median_24,
+  efficiency_gap_24 = eg_24
+)
+```
 
 ### 2024 Election Results and the proposed 2025 District Map
 
+```{r}
+```{r}
+#NEW PART PART 6
+library(tidyverse)
+
+
+# 2025 AB-604 hypothetical results 
+district_25 <- read_csv("data/new_district_results.csv", show_col_types = FALSE) %>%
+  mutate(
+    total = dem_votes + rep_votes,
+    dem_share = dem_votes / total
+  )
+contested_24 <- district_24 %>%
+  filter(dem_votes > 0, rep_votes > 0)
+
+contested_25 <- district_25 %>%
+  filter(dem_votes > 0, rep_votes > 0)
+
+mm_25 <- mean(contested_25$dem_share) -
+         median(contested_25$dem_share)
+mm_25
+
+eg_25 <- efficiency_gap(
+  contested_25$dem_votes,
+  contested_25$rep_votes
+)
+eg_25
+
+results_comparison <- tibble(
+  metric = c("Mean–Median", "Efficiency Gap"),
+  old_map_2024 = c(mean_median_24, eg_24),
+  new_map_2025 = c(mm_25, eg_25)
+)
+
+results_comparison
+
+```

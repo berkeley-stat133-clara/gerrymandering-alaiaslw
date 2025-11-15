@@ -3,3 +3,124 @@ title: Data Cleaning
 format: typst
 ---
 
+---
+title: Data Cleaning
+format: typst
+---
+
+
+```{r}
+#library and packages
+library(readr)
+library(dplyr)
+library(stringr)
+library(tidyverse)
+```
+
+
+```{r}
+raw_data <- read_csv("data/g24_sov_by_g24_svprec.csv")
+vote_cols <- c(
+  "TOTREG", "TOTVOTE",
+  "CNGDEM01", "CNGDEM02",
+  "CNGREP01", "CNGREP02")
+#make clean df
+cleaned_df <- raw_data |>
+  mutate(
+    across(where(is.character), str_trim)
+  ) |>
+    mutate(across(all_of(vote_cols), ~{
+    temp <- ifelse(. %in% c("***", "NA", "N/A", ".", "-", ""), NA, .)
+    numeric_val <- suppressWarnings(as.numeric(temp))
+  numeric_val[is.na(numeric_val)] <- 0
+    as.integer(numeric_val)
+  }))
+#clean dataset
+g24_house <-cleaned_df |>
+    mutate(
+        county = COUNTY, fips = FIPS, svprec = SVPREC, svprec_key = SVPREC_KEY, cddist = CDDIST, totreg = TOTREG, totvote = TOTVOTE, house_dem = CNGDEM01 + CNGDEM02, house_rep = CNGREP01 + CNGREP02)|>
+    select(county,fips,svprec,svprec_key, cddist, totreg, totvote, house_dem,house_rep)|>
+    filter(!is.na(svprec_key),!is.na(totvote), totvote >=0)
+
+#save
+write_csv(g24_house, "data/g24_house_clean.csv")
+
+library(tidyverse)
+library(sf)
+
+# 1. Load cleaned SR-level vote data
+sr_raw <- read_csv("/Users/alaiawittfeld/gerrymandering-alaiaslw-1/data/new_data/state_g24_sov_data_by_g24_srprec.csv")
+
+```
+
+```{r}
+sr_vote_cols <- c(
+  "TOTREG", "TOTVOTE",
+  "CNGDEM01", "CNGDEM02",
+  "CNGREP01", "CNGREP02"
+)
+
+sr_clean <- sr_raw |>
+  # trim spaces from all character columns
+  mutate(across(where(is.character), str_trim)) |>
+  # turn vote columns into integers, cleaning "***" etc
+  mutate(
+    across(all_of(sr_vote_cols), ~{
+      temp <- ifelse(. %in% c("***", "NA", "N/A", ".", "-", ""), NA, .)
+      numeric_val <- suppressWarnings(as.numeric(temp))
+      numeric_val[is.na(numeric_val)] <- 0
+      as.integer(numeric_val)
+    })
+  )
+
+  sr_votes <- sr_clean |>
+  mutate(
+    house_dem = CNGDEM01 + CNGDEM02,
+    house_rep = CNGREP01 + CNGREP02
+  ) |>
+  select(SRPREC, house_dem, house_rep)
+
+```
+
+```{r}
+#Load SR precinct geometries
+sr_shp <- st_read("/Users/alaiawittfeld/gerrymandering-alaiaslw-1/data/new_data/srprec_state_g24_v01_shp") |>
+  st_transform(3310) |>
+  st_make_valid()
+# 3. Load proposed 2025 district map (AB 604)
+ab604 <- st_read("/Users/alaiawittfeld/gerrymandering-alaiaslw-1/data/new_data/AB604/AB604.shp")|>
+  st_transform(3310) |>
+  st_make_valid()
+
+sr_geo <- sr_shp |>
+  left_join(sr_votes, by = "SRPREC")
+```
+```{r}
+ab604_new <- ab604 %>%
+  mutate(new_cddist = DISTRICT)
+
+overlap <- st_intersection(sr_geo, ab604_new)
+overlap <- overlap %>%
+  mutate(piece_area = st_area(geometry)) %>%
+  group_by(SRPREC) %>%
+  mutate(
+    sr_area = sum(piece_area),
+    weight = as.numeric(piece_area / sr_area),
+    dem_alloc = house_dem * weight,
+    rep_alloc = house_rep * weight
+  ) %>%
+  ungroup()
+new_district_results <- overlap %>%
+  st_drop_geometry() %>%
+  group_by(new_cddist) %>%
+  summarise(
+    dem_votes = sum(dem_alloc, na.rm = TRUE),
+    rep_votes = sum(rep_alloc, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(new_cddist)
+write_csv(new_district_results, "data/new_district_results.csv")
+```
+
+```
+
